@@ -1,21 +1,23 @@
 {
   "results": {
     "logistic_regression": {
-      "cv_auc": 0.7803382562868548,
-      "test_auc": 0.834866310160428,
-      "test_accuracy": 0.7507418397626113
+      "spatial_cv_auc": 0.7937527830850942,
+      "spatial_test_auc": 0.8345,
+      "spatial_test_accuracy": 0.7522388059701492
     },
     "random_forest": {
-      "cv_auc": 0.8303740109914213,
-      "test_auc": 0.8439928698752228,
-      "test_accuracy": 0.771513353115727
+      "spatial_cv_auc": 0.8176106231636939,
+      "spatial_test_auc": 0.8545,
+      "spatial_test_accuracy": 0.7761194029850746
     },
     "xgboost": {
-      "cv_auc": 0.8276729767074615,
-      "test_auc": 0.8277896613190731,
-      "test_accuracy": 0.7359050445103857
+      "spatial_cv_auc": 0.7985730162693487,
+      "spatial_test_auc": 0.8552142857142857,
+      "spatial_test_accuracy": 0.7611940298507462
     }
   },
-  "best_model": "random_forest",
-  "n_train": 1683
+  "best_model": "xgboost",
+  "n_train": 1683,
+  "n_spatial_blocks": 495,
+  "note": "AUC/accuracy computed with spatial-block holdout (entire ~20km blocks held out), not random K-fold, to avoid leakage from spatially-clustered DHS survey design."
 }
