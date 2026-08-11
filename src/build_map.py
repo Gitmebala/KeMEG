@@ -35,10 +35,21 @@ def build_raster():
     col = np.round((df["lon"].values - lon_min) / step).astype(int)
     row = np.round((lat_max - df["lat"].values) / step).astype(int)  # row 0 = top = max lat
 
-    grid = np.full((n_rows, n_cols), np.nan, dtype=np.float32)
-    grid[row, col] = df["electrification_prob"].values
+    # Most of Kenya's land area is arid/sparse and legitimately scores low
+    # (median predicted probability ~0.27), so a raw linear 0-1 red-yellow-green
+    # scale makes "yellow" (0.5) almost unreachable -- nearly the whole country
+    # renders red/orange and only the extreme top percentile (Nairobi, western
+    # highlands) shows green. We instead color by percentile rank within
+    # Kenya's own prediction distribution, so the map shows relative standing
+    # (top half greener, bottom half redder) rather than being crushed by the
+    # low absolute baseline everywhere outside the highest-density areas.
+    order = df["electrification_prob"].values.argsort()
+    percentile = np.empty(len(df), dtype=np.float32)
+    percentile[order] = np.linspace(0, 1, len(df))
 
-    # Colorize: red-yellow-green, low prob (underserved) = red, high (electrified) = green
+    grid = np.full((n_rows, n_cols), np.nan, dtype=np.float32)
+    grid[row, col] = percentile
+
     cmap = cm.get_cmap("RdYlGn")
     normed = np.clip(grid, 0, 1)
     rgba = cmap(normed, bytes=True)  # (n_rows, n_cols, 4) uint8
@@ -117,10 +128,11 @@ def main():
     <div style="position: fixed; bottom: 30px; left: 30px; z-index: 9999;
                 background: white; padding: 12px 14px; border-radius: 6px;
                 box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-family: sans-serif; font-size: 13px;">
-      <b>Kenya Electrification Map</b><br><br>
-      <div><span style="display:inline-block;width:14px;height:14px;background:#1a9850;margin-right:6px;"></span>High electrification probability</div>
-      <div><span style="display:inline-block;width:14px;height:14px;background:#fee08b;margin-right:6px;"></span>Mixed / uncertain</div>
-      <div><span style="display:inline-block;width:14px;height:14px;background:#d73027;margin-right:6px;"></span>Low electrification probability (underserved)</div>
+      <b>Kenya Electrification Map</b><br>
+      <span style="color:#666;">Color = relative standing vs. rest of Kenya (percentile), not raw probability</span><br><br>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#1a9850;margin-right:6px;"></span>Top-half electrification (above national median)</div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#fee08b;margin-right:6px;"></span>Around the median</div>
+      <div><span style="display:inline-block;width:14px;height:14px;background:#d73027;margin-right:6px;"></span>Bottom-half electrification (underserved)</div>
       <br>
       <b>Ranked microgrid sites</b> (one best per ~55km region)<br>
       <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:red;border:1px solid black;margin-right:6px;"></span>Most urgent region (avg. electrification &lt; 15%)</div>
