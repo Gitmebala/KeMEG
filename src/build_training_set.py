@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
-FEATURES_PATH = "data/raw/full_kenya_500m_features.csv"
+FEATURES_PATH = "data/processed/enriched_features.csv"
 DHS_PATH = "data/processed/dhs_cluster_electrification.csv"
 OUT_PATH = "data/processed/training_set.csv"
 
@@ -32,10 +32,8 @@ def main():
     dhs = pd.read_csv(DHS_PATH)
     print(f"  {len(dhs)} DHS clusters loaded")
 
-    print("Loading 500m feature grid (this may take a minute, file is large)...")
-    usecols = ["lon", "lat", "building_count", "dist_to_nearest_building_m",
-               "pole_count", "dist_to_nearest_pole_m"]
-    feat = pd.read_csv(FEATURES_PATH, usecols=usecols)  # skip geometry WKT column, not needed
+    print("Loading enriched 500m feature grid...")
+    feat = pd.read_csv(FEATURES_PATH)
     print(f"  {len(feat)} grid cells loaded, columns: {list(feat.columns)}")
 
     if "lon" not in feat.columns or "lat" not in feat.columns:

@@ -1,61 +1,81 @@
 """
-Apply the trained model to all ~200k grid cells nationwide, then filter and
+Apply the trained model to all ~2.9M grid cells nationwide, then filter and
 rank underserved cells as microgrid candidate sites.
+
+Site selection uses real WorldPop population (not the binary OSM building
+flag) so remote, OSM-sparse but genuinely inhabited regions -- exactly the
+least-electrified counties per CRA data (Turkana, Marsabit, Wajir, Mandera)
+-- aren't filtered out just because nobody has mapped their buildings on OSM.
+
+Ranked sites are picked one-per-macro-cell (10km bins) rather than by a
+greedy score-then-suppress pass, so the result reflects genuine nationwide
+geographic spread instead of clustering wherever candidates happen to tie or
+appear first in the source file's row order.
 """
 import joblib
 import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
 
-FEATURES_PATH = "data/raw/full_kenya_500m_features.csv"
+FEATURES_PATH = "data/processed/enriched_features.csv"
 MODEL_PATH = "output/electrification_model.joblib"
 PREDICTIONS_OUT = "output/national_predictions.csv"
 RANKED_SITES_OUT = "output/ranked_microgrid_sites.csv"
 DEDUPED_SITES_OUT = "output/ranked_microgrid_sites_deduped.csv"
 
 # Microgrid candidate filters
-# NOTE: building_count in this dataset is a binary presence flag (0/1) per 500m cell,
-# not a true structure count -- so "populated" means building_count >= 1.
 MAX_ELECTRIFICATION_PROB = 0.35   # likely underserved
-MIN_BUILDING_COUNT = 1            # populated, not empty wilderness
+MIN_POPULATION = 5                # populated, not empty wilderness (real WorldPop count)
 MIN_DIST_TO_GRID_M = 500          # grid extension not economical beyond this
 
-# Deduplication: adjacent 500m cells in the same settlement would otherwise all
-# rank as top candidates. We greedily pick the best-scoring cell in each
-# neighborhood and suppress other candidates within MIN_SITE_SPACING_M of it,
-# so ranked sites represent distinct settlements, not repeated grid cells.
-TOP_CANDIDATES_FOR_DEDUP = 5000
-MIN_SITE_SPACING_M = 1500
+# Geographic diversification: a purely national suitability ranking, dominated
+# by population, will always crown the same high-density western settlements
+# and completely starve low-density-but-highest-need arid counties (Turkana
+# 2.4% electrified, West Pokot 2.0%, Mandera 2.5% per CRA data) of any
+# representation. Instead we bin candidates into REGION_CELL_DEG (~55km)
+# regions and normalize suitability *within* each region -- so a region's own
+# best opportunity is judged against its own distribution, not against
+# Nairobi's or Kiambu's population scale. We then take the single best site
+# per qualifying region, prioritizing the neediest (lowest mean
+# electrification probability) regions first when capping the total.
+REGION_CELL_DEG = 0.5   # ~55km at the equator
+MIN_CANDIDATES_PER_REGION = 15  # ignore tiny/noisy regions with too few candidate cells
 N_DISTINCT_SITES = 150
 
 
-def to_xy(lon, lat):
-    R = 6371000.0
-    x = R * np.radians(lon)
-    y = R * np.radians(lat)
-    return x, y
+def pick_best_per_region(candidates):
+    c = candidates.copy()
+    c["region_lon"] = (c["lon"] // REGION_CELL_DEG).astype(int)
+    c["region_lat"] = (c["lat"] // REGION_CELL_DEG).astype(int)
 
+    def norm(s):
+        s = s.astype(float)
+        rng = s.max() - s.min()
+        return (s - s.min()) / rng if rng > 0 else s * 0 + 0.5
 
-def dedupe_sites(ranked):
-    top = ranked.head(TOP_CANDIDATES_FOR_DEDUP).reset_index(drop=True)
-    x, y = to_xy(top["lon"].values, top["lat"].values)
-    coords = np.column_stack([x, y])
+    winners = []
+    region_priority = []
+    for (rlon, rlat), grp in c.groupby(["region_lon", "region_lat"]):
+        if len(grp) < MIN_CANDIDATES_PER_REGION:
+            continue
+        local_score = (
+            0.40 * norm(grp["population"])
+            + 0.30 * norm(grp["buildings_within_1000m"])
+            + 0.30 * norm(grp["dist_to_nearest_pole_m"])
+        )
+        best = grp.loc[local_score.idxmax()].copy()
+        best["local_suitability_score"] = local_score.max()
+        best["region_n_candidates"] = len(grp)
+        best["region_mean_electrification_prob"] = grp["electrification_prob"].mean()
+        winners.append(best)
+        region_priority.append(best["region_mean_electrification_prob"])
 
-    selected_idx, selected_coords = [], []
-    for i in range(len(top)):
-        pt = coords[i]
-        if selected_coords:
-            d = np.min(np.linalg.norm(np.array(selected_coords) - pt, axis=1))
-            if d < MIN_SITE_SPACING_M:
-                continue
-        selected_idx.append(i)
-        selected_coords.append(pt)
-        if len(selected_idx) >= N_DISTINCT_SITES:
-            break
-
-    deduped = top.iloc[selected_idx].reset_index(drop=True)
-    deduped["rank"] = deduped.index + 1
-    return deduped
+    winners_df = pd.DataFrame(winners).drop(columns=["region_lon", "region_lat"])
+    # Neediest regions (lowest mean electrification probability) get priority
+    # when we have more qualifying regions than slots to fill.
+    winners_df = winners_df.sort_values("region_mean_electrification_prob", ascending=True).reset_index(drop=True)
+    winners_df = winners_df.head(N_DISTINCT_SITES)
+    winners_df["rank"] = winners_df.index + 1
+    return winners_df
 
 
 def main():
@@ -64,10 +84,8 @@ def main():
     model, features = bundle["model"], bundle["features"]
     print(f"Model: {bundle['name']}, features: {features}")
 
-    print("Loading national feature grid...")
-    usecols = ["lon", "lat", "building_count", "dist_to_nearest_building_m",
-               "pole_count", "dist_to_nearest_pole_m"]
-    df = pd.read_csv(FEATURES_PATH, usecols=usecols)
+    print("Loading enriched national feature grid...")
+    df = pd.read_csv(FEATURES_PATH)
     X = df[features].fillna(0)
 
     print("Predicting electrification probability for all cells...")
@@ -77,24 +95,23 @@ def main():
     print(f"Saved full national predictions to {PREDICTIONS_OUT}")
 
     # --- Microgrid candidate filtering ---
-    # dist_to_nearest_pole_m is our proxy for distance to grid infrastructure
     candidates = df[df["electrification_prob"] <= MAX_ELECTRIFICATION_PROB].copy()
-    candidates = candidates[candidates["building_count"] >= MIN_BUILDING_COUNT]
+    candidates = candidates[candidates["population"] >= MIN_POPULATION]
     candidates = candidates[candidates["dist_to_nearest_pole_m"] >= MIN_DIST_TO_GRID_M]
 
     print(f"{len(candidates)} candidate cells after filtering (underserved + populated + far from grid)")
+    print("Candidate distribution by region (rough quadrants):")
+    print(f"  lon<36 (west): {(candidates['lon'] < 36).sum()}   lon>=36 (east): {(candidates['lon'] >= 36).sum()}")
+    print(f"  lat<0 (south): {(candidates['lat'] < 0).sum()}   lat>=0 (north): {(candidates['lat'] >= 0).sum()}")
 
-    # --- Suitability score: 40% population proxy, 30% building density, 30% distance from grid ---
+    # --- Suitability score: 40% population, 30% building density, 30% distance from grid ---
     def norm(s):
         s = s.astype(float)
         rng = s.max() - s.min()
         return (s - s.min()) / rng if rng > 0 else s * 0
 
-    # No population raster available. building_count is binary (presence/absence) in this
-    # dataset, so it can't rank density -- dist_to_nearest_building_m is our continuous
-    # settlement-density proxy instead (closer neighboring building = denser cluster).
-    candidates["score_pop"] = 1 - norm(candidates["dist_to_nearest_building_m"])
-    candidates["score_building"] = 1 - norm(candidates["dist_to_nearest_building_m"])
+    candidates["score_pop"] = norm(candidates["population"])
+    candidates["score_building"] = norm(candidates["buildings_within_1000m"])
     candidates["score_grid_dist"] = norm(candidates["dist_to_nearest_pole_m"])
 
     candidates["suitability_score"] = (
@@ -109,11 +126,13 @@ def main():
     ranked.to_csv(RANKED_SITES_OUT, index=False)
     print(f"Saved {len(ranked)} ranked microgrid candidate sites to {RANKED_SITES_OUT}")
 
-    print("Deduplicating into spatially distinct settlement sites...")
-    deduped = dedupe_sites(ranked)
+    print("Selecting the best site per ~55km region (locally normalized, neediest regions first)...")
+    deduped = pick_best_per_region(candidates)
     deduped.to_csv(DEDUPED_SITES_OUT, index=False)
     print(f"Saved {len(deduped)} spatially distinct top sites to {DEDUPED_SITES_OUT}")
-    print(deduped[["lon", "lat", "electrification_prob", "suitability_score", "rank"]].head(20))
+    print(f"  lon range: {deduped['lon'].min():.2f} to {deduped['lon'].max():.2f}")
+    print(f"  lat range: {deduped['lat'].min():.2f} to {deduped['lat'].max():.2f}")
+    print(deduped[["lon", "lat", "population", "electrification_prob", "suitability_score", "rank"]].head(20))
 
 
 if __name__ == "__main__":

@@ -56,10 +56,13 @@ def build_raster():
     return bounds
 
 
-def suitability_color(score):
-    if score >= 0.9:
+def need_color(region_mean_prob):
+    # Colored by how underserved the surrounding region is (lower = more urgent),
+    # not by suitability score -- suitability is normalized *within* each region
+    # so it isn't comparable across regions, but electrification need is.
+    if region_mean_prob < 0.15:
         return "red"
-    elif score >= 0.8:
+    elif region_mean_prob < 0.25:
         return "orange"
     else:
         return "beige"
@@ -85,9 +88,11 @@ def main():
         popup_html = f"""
         <div style="font-family: sans-serif; font-size: 13px;">
         <b>Microgrid Site — Rank #{int(row_['rank'])}</b><br>
-        Electrification probability: {row_['electrification_prob']:.2f}<br>
-        Suitability score: {row_['suitability_score']:.2f}<br>
+        Cell electrification probability: {row_['electrification_prob']:.2f}<br>
+        Surrounding region avg. electrification probability: {row_['region_mean_electrification_prob']:.2f}<br>
+        Best-in-region suitability score: {row_['local_suitability_score']:.2f}<br>
         <hr style="margin:4px 0;">
+        Est. population served: {int(row_['served_population'])}<br>
         Est. households served: {int(row_['est_households'])}<br>
         Daily demand: {row_['daily_demand_kwh']:.1f} kWh<br>
         Solar PV size: {row_['solar_pv_kw']:.1f} kW<br>
@@ -102,9 +107,9 @@ def main():
             color="black",
             weight=1,
             fill=True,
-            fill_color=suitability_color(row_["suitability_score"]),
+            fill_color=need_color(row_["region_mean_electrification_prob"]),
             fill_opacity=0.9,
-            popup=folium.Popup(popup_html, max_width=280),
+            popup=folium.Popup(popup_html, max_width=300),
         ).add_to(site_layer)
 
     # --- Legend ---
@@ -117,9 +122,10 @@ def main():
       <div><span style="display:inline-block;width:14px;height:14px;background:#fee08b;margin-right:6px;"></span>Mixed / uncertain</div>
       <div><span style="display:inline-block;width:14px;height:14px;background:#d73027;margin-right:6px;"></span>Low electrification probability (underserved)</div>
       <br>
-      <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:red;border:1px solid black;margin-right:6px;"></span>Top microgrid site (score ≥ 0.9)</div>
-      <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:orange;border:1px solid black;margin-right:6px;"></span>Strong candidate (0.8–0.9)</div>
-      <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:beige;border:1px solid black;margin-right:6px;"></span>Candidate (&lt; 0.8)</div>
+      <b>Ranked microgrid sites</b> (one best per ~55km region)<br>
+      <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:red;border:1px solid black;margin-right:6px;"></span>Most urgent region (avg. electrification &lt; 15%)</div>
+      <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:orange;border:1px solid black;margin-right:6px;"></span>High need (15–25%)</div>
+      <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:beige;border:1px solid black;margin-right:6px;"></span>Underserved (&gt; 25%)</div>
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))

@@ -1,19 +1,19 @@
 {
   "results": {
     "logistic_regression": {
-      "cv_auc": 0.5220272642390289,
-      "test_auc": 0.4865953654188948,
-      "test_accuracy": 0.5608308605341247
+      "cv_auc": 0.7803382562868548,
+      "test_auc": 0.834866310160428,
+      "test_accuracy": 0.7507418397626113
     },
     "random_forest": {
-      "cv_auc": 0.701556070974251,
-      "test_auc": 0.7179500891265598,
-      "test_accuracy": 0.6617210682492581
+      "cv_auc": 0.8303740109914213,
+      "test_auc": 0.8439928698752228,
+      "test_accuracy": 0.771513353115727
     },
     "xgboost": {
-      "cv_auc": 0.6871350738505693,
-      "test_auc": 0.6944919786096256,
-      "test_accuracy": 0.6379821958456974
+      "cv_auc": 0.8276729767074615,
+      "test_auc": 0.8277896613190731,
+      "test_accuracy": 0.7359050445103857
     }
   },
   "best_model": "random_forest",

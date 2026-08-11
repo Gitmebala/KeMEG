@@ -24,6 +24,11 @@ CANDIDATE_FEATURES = [
     "dist_to_nearest_building_m",
     "pole_count",
     "dist_to_nearest_pole_m",
+    "population",
+    "buildings_within_1000m",
+    "buildings_within_3000m",
+    "poles_within_5000m",
+    "poles_within_10000m",
 ]
 
 
