@@ -1,0 +1,13 @@
+# Raw + intermediate data (large, regenerable from Drive + scripts)
+data/raw/
+data/processed/
+
+# The full national predictions file is ~276MB (2.9M rows) -- too big for git.
+# Regenerate with: python src/predict_and_rank.py
+output/national_predictions.csv
+output/ranked_microgrid_sites.csv
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
