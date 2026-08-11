@@ -1,0 +1,21 @@
+{
+  "results": {
+    "logistic_regression": {
+      "cv_auc": 0.5220272642390289,
+      "test_auc": 0.4865953654188948,
+      "test_accuracy": 0.5608308605341247
+    },
+    "random_forest": {
+      "cv_auc": 0.701556070974251,
+      "test_auc": 0.7179500891265598,
+      "test_accuracy": 0.6617210682492581
+    },
+    "xgboost": {
+      "cv_auc": 0.6871350738505693,
+      "test_auc": 0.6944919786096256,
+      "test_accuracy": 0.6379821958456974
+    }
+  },
+  "best_model": "random_forest",
+  "n_train": 1683
+}
