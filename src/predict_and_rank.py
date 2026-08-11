@@ -22,24 +22,32 @@ PREDICTIONS_OUT = "output/national_predictions.csv"
 RANKED_SITES_OUT = "output/ranked_microgrid_sites.csv"
 DEDUPED_SITES_OUT = "output/ranked_microgrid_sites_deduped.csv"
 
-# Microgrid candidate filters
-MAX_ELECTRIFICATION_PROB = 0.35   # likely underserved
-MIN_POPULATION = 5                # populated, not empty wilderness (real WorldPop count)
+# Microgrid candidate filters. Narrowed from the earlier pass (0.35 prob / pop
+# >= 5 / 150 sites) to a smaller, higher-confidence shortlist: national median
+# predicted probability is ~0.27, so 0.35 was barely below-average, not
+# genuinely underserved -- 0.20 means the model is confidently calling the
+# cell underserved. MIN_POPULATION raised from 5 to 20 so sites represent a
+# real hamlet, not a handful of scattered structures.
+MAX_ELECTRIFICATION_PROB = 0.20   # confidently underserved, not just below-average
+MIN_POPULATION = 20               # a genuine small settlement (real WorldPop count)
 MIN_DIST_TO_GRID_M = 500          # grid extension not economical beyond this
 
 # Geographic diversification: a purely national suitability ranking, dominated
 # by population, will always crown the same high-density western settlements
 # and completely starve low-density-but-highest-need arid counties (Turkana
 # 2.4% electrified, West Pokot 2.0%, Mandera 2.5% per CRA data) of any
-# representation. Instead we bin candidates into REGION_CELL_DEG (~55km)
-# regions and normalize suitability *within* each region -- so a region's own
-# best opportunity is judged against its own distribution, not against
-# Nairobi's or Kiambu's population scale. We then take the single best site
-# per qualifying region, prioritizing the neediest (lowest mean
-# electrification probability) regions first when capping the total.
-REGION_CELL_DEG = 0.5   # ~55km at the equator
-MIN_CANDIDATES_PER_REGION = 15  # ignore tiny/noisy regions with too few candidate cells
-N_DISTINCT_SITES = 150
+# representation. Instead we bin candidates into REGION_CELL_DEG regions and
+# normalize suitability *within* each region -- so a region's own best
+# opportunity is judged against its own distribution, not against Nairobi's or
+# Kiambu's population scale. We then take the single best site per qualifying
+# region, prioritizing the neediest (lowest mean electrification probability)
+# regions first when capping the total. Region size doubled from ~55km to
+# ~110km and the site cap cut from 150 to 40 -- each surviving site now
+# represents a meaningfully larger, more distinct catchment area instead of
+# a dense scatter of markers every 55km.
+REGION_CELL_DEG = 1.0   # ~110km at the equator
+MIN_CANDIDATES_PER_REGION = 25  # ignore tiny/noisy regions with too few candidate cells
+N_DISTINCT_SITES = 40
 
 
 def pick_best_per_region(candidates):

@@ -134,7 +134,7 @@ def main():
       <div><span style="display:inline-block;width:14px;height:14px;background:#fee08b;margin-right:6px;"></span>Around the median</div>
       <div><span style="display:inline-block;width:14px;height:14px;background:#d73027;margin-right:6px;"></span>Bottom-half electrification (underserved)</div>
       <br>
-      <b>Ranked microgrid sites</b> (one best per ~55km region)<br>
+      <b>Ranked microgrid sites</b> (one best per ~110km region, confidently underserved only)<br>
       <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:red;border:1px solid black;margin-right:6px;"></span>Most urgent region (avg. electrification &lt; 15%)</div>
       <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:orange;border:1px solid black;margin-right:6px;"></span>High need (15–25%)</div>
       <div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:beige;border:1px solid black;margin-right:6px;"></span>Underserved (&gt; 25%)</div>
