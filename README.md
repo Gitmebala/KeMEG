@@ -35,21 +35,40 @@ areas are.
 3. **Model**: DHS clusters are spatially matched to their nearest 500m grid
    cell, producing 1,683 labeled training examples across 495 spatial blocks
    (~20km each). An XGBoost classifier trained on the enriched features
-   (population, building/pole/road neighborhood density) achieves **spatial
-   test AUC 0.855, accuracy 78%** — evaluated with spatial-block holdout
-   (entire ~20km blocks held out of training), not random K-fold: 62% of DHS
-   clusters sit within 5km of another cluster, so random splitting would let
-   near-duplicate points leak across train/test and overstate accuracy. This
-   is up from an initial AUC 0.72 baseline using only raw binary OSM flags.
+   (population, building/pole/road neighborhood density, VIIRS nighttime
+   lights) achieves **spatial test AUC 0.857, accuracy 77%** — evaluated
+   with spatial-block holdout (entire ~20km blocks held out of training),
+   not random K-fold: 62% of DHS clusters sit within 5km of another cluster,
+   so random splitting would let near-duplicate points leak across
+   train/test and overstate accuracy. This is up from an initial AUC 0.72
+   baseline using only raw binary OSM flags.
+
    `roads_within_2000m` and `dist_to_nearest_road_m` (pulled from OSM via
-   Overpass API, not in the original feature set) rank as the 2nd and 4th
-   most important features respectively — roads are one of the strongest
-   electrification predictors in the literature and materially improved
-   both accuracy and the separation between known-electrified and
-   known-underserved areas (e.g. Nairobi/Kiambu/Mombasa mean predicted
-   probability rose from ~0.68 to ~0.72; Turkana/Wajir fell from ~0.22 to
-   ~0.15, sharpening the gap in the correct direction against real CRA
-   county rates).
+   Overpass API) rank as the 2nd and 5th most important features — roads are
+   one of the strongest electrification predictors in the literature.
+   `ntl_radiance` (VIIRS annual nighttime-lights composite, see below) adds a
+   further, more moderate gain — 7th of 12 features by importance, likely
+   capped by the fact that 95.5% of cells (including most rural DHS training
+   points) have literally zero recorded light, limiting its power to
+   discriminate within that dominant zero-band even though it clearly
+   separates known-urban from known-rural ground truth. Net effect across
+   all enrichment: Nairobi/Kiambu/Mombasa mean predicted probability rose
+   from ~0.68 to ~0.73-0.74; Turkana/Wajir fell to ~0.14-0.16, sharpening the
+   gap in the correct direction against real CRA county rates.
+
+   **VIIRS nighttime lights**: the original project plan flagged this as
+   blocked pending Earth Engine or NOAA/EOG account access. We registered a
+   free EOG account and pulled the 2025 annual VNL v2.2 composite
+   (`average_masked`, background already zeroed) directly. The global file
+   is a ~11.6GB gzip-compressed BigTIFF with its IFD (metadata) stored at
+   the very end -- a "data first, metadata last" streaming layout -- so
+   rather than decompressing the whole thing (which exceeded available
+   local disk space), `src/crop_viirs.py` inspects the raw header, confirms
+   the pixel layout is fully predictable from geometry alone (86400x33600,
+   row-major, uncompressed float32, 180W-180E/75N-65S), and stream-decompresses
+   sequentially through only Kenya's row range (~5.8GB of skip + ~21.5MB
+   kept), discarding everything else without ever writing the full raster
+   to disk.
 4. **National prediction**: The trained model is applied to all 2.91M grid
    cells to produce a nationwide electrification probability map.
 5. **Microgrid site ranking**: Cells are filtered to those that are likely
@@ -89,11 +108,13 @@ areas are.
 src/
   enrich_features.py       # samples WorldPop population + KDTree neighborhood density
   add_road_features.py     # pulls OSM roads via Overpass, adds road-distance/density
-  build_training_set.py    # spatial-join DHS clusters to grid cells -> labels
-  train_model.py            # trains + compares LR / RF / XGBoost with spatial-block CV
-  predict_and_rank.py       # predicts nationwide, filters + region-normalized ranking
-  engineering_specs.py      # sizes solar/battery/cost for top sites
-  build_map.py               # renders the interactive HTML map (rasterized choropleth)
+  crop_viirs.py             # streams Kenya's slice out of the global VIIRS composite
+  add_viirs_features.py     # samples nighttime radiance onto the grid
+  build_training_set.py     # spatial-join DHS clusters to grid cells -> labels
+  train_model.py             # trains + compares LR / RF / XGBoost with spatial-block CV
+  predict_and_rank.py        # predicts nationwide, filters + region-normalized ranking
+  engineering_specs.py       # sizes solar/battery/cost for top sites
+  build_map.py                # renders the interactive HTML map (rasterized choropleth)
 data/
   raw/                       # DHS + OSM + WorldPop source data (gitignored)
   processed/                 # enriched_features.csv, training_set.csv (gitignored)
@@ -107,8 +128,10 @@ output/
 ```
 
 Run in order: `enrich_features.py` → `add_road_features.py` →
-`build_training_set.py` → `train_model.py` → `predict_and_rank.py` →
-`engineering_specs.py` → `build_map.py`.
+`crop_viirs.py` → `add_viirs_features.py` → `build_training_set.py` →
+`train_model.py` → `predict_and_rank.py` → `engineering_specs.py` →
+`build_map.py`. (`crop_viirs.py` needs the global VIIRS composite downloaded
+to `data/raw/viirs/` first -- requires a free EOG account, see below.)
 
 ## Known limitations (honest accounting)
 
@@ -116,11 +139,11 @@ Run in order: `enrich_features.py` → `add_road_features.py` →
   flags per cell, not true counts.** We work around this with KDTree
   neighborhood density counts, but a real building-footprint count would
   sharpen this further.
-- **AUC 0.855 / 78% accuracy is good but not great** — roughly 1 in 5 cells
-  could be misclassified. The single biggest likely further improvement is
-  VIIRS nighttime lights — we attempted to pull these directly (bypassing
-  Google Earth Engine) but NOAA/EOG's hosting requires an authenticated
-  account login, so this remains blocked pending registration.
+- **AUC 0.857 / 77% accuracy is good but not great** — roughly 1 in 4-5
+  cells could be misclassified. With nighttime lights now integrated, the
+  next likely lever is more/denser ground-truth labels (currently only
+  1,683 DHS-labeled cells nationwide) or finer building-footprint data than
+  this OSM extract's binary presence flags.
 - **County-level CRA electrification rates aren't currently joined in as a
   model feature** — no county boundary shapefile was available locally, and
   public sources we tried (geoBoundaries API, GitHub mirrors) were either
@@ -147,5 +170,7 @@ Run in order: `enrich_features.py` → `add_road_features.py` →
 - OpenStreetMap major road network (trunk/primary/secondary/tertiary), pulled
   live via Overpass API
 - WorldPop Kenya 2020 population count, 1km resolution (data.worldpop.org)
+- VIIRS annual nighttime lights composite, 2025 v2.2 (Earth Observation
+  Group, Payne Institute, eogdata.mines.edu) — free account required
 - Kenya Commission on Revenue Allocation — county electrification rates
   (not yet integrated as a model feature, held for future work)

@@ -41,6 +41,7 @@ CANDIDATE_FEATURES = [
     "poles_within_10000m",
     "dist_to_nearest_road_m",
     "roads_within_2000m",
+    "ntl_radiance",
 ]
 
 
