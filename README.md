@@ -29,32 +29,50 @@ areas are.
 2. **Features**: OpenStreetMap-derived building/pole presence and distance,
    real WorldPop 2020 population (sampled per cell, apportioned so per-cell
    values sum back to Kenya's true ~54.8M population instead of quadruple-
-   counting), and continuous neighborhood density (buildings within 1km/3km,
-   poles within 5km/10km via KDTree) — for every 500m cell across Kenya
+   counting), continuous neighborhood density (buildings within 1km/3km,
+   poles within 5km/10km via KDTree), OSM road distance/density, VIIRS
+   nighttime lights, and **Google Open Buildings** real building counts
+   (satellite ML detection, see below) — for every 500m cell across Kenya
    (2.91M cells, a perfect 1500×1940 grid).
 3. **Model**: DHS clusters are spatially matched to their nearest 500m grid
    cell, producing 1,683 labeled training examples across 495 spatial blocks
    (~20km each). An XGBoost classifier trained on the enriched features
-   (population, building/pole/road neighborhood density, VIIRS nighttime
-   lights) achieves **spatial test AUC 0.857, accuracy 77%** — evaluated
-   with spatial-block holdout (entire ~20km blocks held out of training),
-   not random K-fold: 62% of DHS clusters sit within 5km of another cluster,
-   so random splitting would let near-duplicate points leak across
-   train/test and overstate accuracy. This is up from an initial AUC 0.72
-   baseline using only raw binary OSM flags.
+   achieves **spatial test AUC 0.886, accuracy 80.6%** — evaluated with
+   spatial-block holdout (entire ~20km blocks held out of training), not
+   random K-fold: 62% of DHS clusters sit within 5km of another cluster, so
+   random splitting would let near-duplicate points leak across train/test
+   and overstate accuracy. This is up from an initial AUC 0.72 baseline
+   using only raw binary OSM flags — see the progression below.
 
-   `roads_within_2000m` and `dist_to_nearest_road_m` (pulled from OSM via
-   Overpass API) rank as the 2nd and 5th most important features — roads are
-   one of the strongest electrification predictors in the literature.
-   `ntl_radiance` (VIIRS annual nighttime-lights composite, see below) adds a
-   further, more moderate gain — 7th of 12 features by importance, likely
-   capped by the fact that 95.5% of cells (including most rural DHS training
-   points) have literally zero recorded light, limiting its power to
-   discriminate within that dominant zero-band even though it clearly
-   separates known-urban from known-rural ground truth. Net effect across
-   all enrichment: Nairobi/Kiambu/Mombasa mean predicted probability rose
-   from ~0.68 to ~0.73-0.74; Turkana/Wajir fell to ~0.14-0.16, sharpening the
-   gap in the correct direction against real CRA county rates.
+   | Stage | Spatial test AUC | Accuracy |
+   |---|---|---|
+   | Binary OSM building/pole flags only | 0.72 | ~66% |
+   | + real WorldPop population, neighborhood density | 0.84 | ~77% |
+   | + OSM road distance/density | 0.855 | ~78% |
+   | + VIIRS nighttime lights | 0.857 | ~77% |
+   | + **Google Open Buildings** (real building counts) | **0.886** | **80.6%** |
+
+   `google_buildings_within_1000m` is the single most important feature by a
+   wide margin (0.270, more than double the next), confirming the hypothesis
+   that OSM's building data was the weakest link: OSM only flags 6.7% of
+   Kenya's cells as having a building (community mapping is patchy,
+   especially outside urban areas), while Google Open Buildings — satellite
+   imagery run through an ML detector, no community mapping required — flags
+   21.6% of cells with actual counts, 31.5M buildings total nationwide. Real,
+   complete building data mattered more than any other single feature added.
+
+   Nairobi/Kiambu/Mombasa mean predicted probability is now ~0.68-0.74;
+   Turkana/Wajir ~0.11-0.17 — correctly and increasingly sharply separated in
+   the direction real CRA county rates say they should be.
+
+   **90%+ accuracy is very unlikely achievable with this approach and we
+   don't claim it's a near-term target.** DHS survey coordinates are randomly
+   displaced up to 2-10km for privacy, so even a perfect model is learning
+   from labels that don't precisely match the 500m cell they're attached to.
+   Published academic work in this space typically tops out around AUC
+   0.85-0.90 / accuracy in the low-to-mid 80s; higher claims on this kind of
+   task are usually a red flag for leakage, not genuine skill. 0.886 sits
+   near the top of that realistic range.
 
    **VIIRS nighttime lights**: the original project plan flagged this as
    blocked pending Earth Engine or NOAA/EOG account access. We registered a
@@ -69,6 +87,20 @@ areas are.
    sequentially through only Kenya's row range (~5.8GB of skip + ~21.5MB
    kept), discarding everything else without ever writing the full raster
    to disk.
+
+   **Google Open Buildings**: fully public GCS bucket
+   (`storage.googleapis.com/open-buildings-data`), no login required.
+   `notebooks/kenya_open_buildings.ipynb` (run in Colab, since the ~30M-point
+   download needs disk headroom this machine didn't have) finds the 11 S2
+   level-4 tiles covering Kenya, downloads each tile's building point data,
+   and bins ~31.5M building locations onto our exact 500m grid. The result
+   (`kenya_google_building_density.csv`) is merged in via **nearest-neighbor
+   spatial join, not an exact lon/lat merge** — both grids use the same
+   definition but were computed independently (locally vs. in Colab) via
+   `np.arange`/rounding, and tiny floating-point representation differences
+   meant an exact-equality merge matched only 21 of 2.91M rows on one attempt
+   (a real bug caught by checking the merged output's nonzero fraction
+   against the source file's, not just checking the columns existed).
 4. **National prediction**: The trained model is applied to all 2.91M grid
    cells to produce a nationwide electrification probability map.
 5. **Microgrid site ranking**: Cells are filtered to those that are likely
@@ -105,19 +137,23 @@ areas are.
 ## Repo layout
 
 ```
+notebooks/
+  kenya_open_buildings.ipynb          # run in Colab: fetches Google Open Buildings for Kenya
+  colab_open_buildings_snippet.py     # same code, plain .py reference
 src/
-  enrich_features.py       # samples WorldPop population + KDTree neighborhood density
-  add_road_features.py     # pulls OSM roads via Overpass, adds road-distance/density
-  crop_viirs.py             # streams Kenya's slice out of the global VIIRS composite
-  add_viirs_features.py     # samples nighttime radiance onto the grid
-  build_training_set.py     # spatial-join DHS clusters to grid cells -> labels
-  train_model.py             # trains + compares LR / RF / XGBoost with spatial-block CV
-  predict_and_rank.py        # predicts nationwide, filters + region-normalized ranking
-  engineering_specs.py       # sizes solar/battery/cost for top sites
-  build_map.py                # renders the interactive HTML map (rasterized choropleth)
+  enrich_features.py        # samples WorldPop population + KDTree neighborhood density
+  add_road_features.py      # pulls OSM roads via Overpass, adds road-distance/density
+  crop_viirs.py              # streams Kenya's slice out of the global VIIRS composite
+  add_viirs_features.py      # samples nighttime radiance onto the grid
+  add_google_buildings.py    # merges Google Open Buildings density (nearest-neighbor join)
+  build_training_set.py      # spatial-join DHS clusters to grid cells -> labels
+  train_model.py              # trains + compares LR / RF / XGBoost with spatial-block CV
+  predict_and_rank.py         # predicts nationwide, filters + region-normalized ranking
+  engineering_specs.py        # sizes solar/battery/cost for top sites
+  build_map.py                 # renders the interactive HTML map (rasterized choropleth)
 data/
-  raw/                       # DHS + OSM + WorldPop source data (gitignored)
-  processed/                 # enriched_features.csv, training_set.csv (gitignored)
+  raw/                        # DHS + OSM + WorldPop + VIIRS + Google Buildings (gitignored)
+  processed/                  # enriched_features.csv, training_set.csv (gitignored)
 output/
   electrification_model.joblib
   model_metrics.json
@@ -128,22 +164,26 @@ output/
 ```
 
 Run in order: `enrich_features.py` → `add_road_features.py` →
-`crop_viirs.py` → `add_viirs_features.py` → `build_training_set.py` →
-`train_model.py` → `predict_and_rank.py` → `engineering_specs.py` →
-`build_map.py`. (`crop_viirs.py` needs the global VIIRS composite downloaded
-to `data/raw/viirs/` first -- requires a free EOG account, see below.)
+`crop_viirs.py` → `add_viirs_features.py` → run
+`notebooks/kenya_open_buildings.ipynb` in Colab and place its output CSV in
+`data/raw/google_buildings/` → `add_google_buildings.py` →
+`build_training_set.py` → `train_model.py` → `predict_and_rank.py` →
+`engineering_specs.py` → `build_map.py`. (`crop_viirs.py` needs the global
+VIIRS composite downloaded to `data/raw/viirs/` first — requires a free EOG
+account, see below.)
 
 ## Known limitations (honest accounting)
 
-- **`building_count` / `pole_count` in this OSM extract are binary presence
-  flags per cell, not true counts.** We work around this with KDTree
-  neighborhood density counts, but a real building-footprint count would
-  sharpen this further.
-- **AUC 0.857 / 77% accuracy is good but not great** — roughly 1 in 4-5
-  cells could be misclassified. With nighttime lights now integrated, the
-  next likely lever is more/denser ground-truth labels (currently only
-  1,683 DHS-labeled cells nationwide) or finer building-footprint data than
-  this OSM extract's binary presence flags.
+- **`building_count` / `pole_count` in the OSM extract are binary presence
+  flags per cell, not true counts** — largely superseded now by real Google
+  Open Buildings counts, but `pole_count` (grid infrastructure) has no
+  equivalent alternative source and remains sparse (see below).
+- **AUC 0.886 / 80.6% accuracy is good, near the realistic ceiling for this
+  kind of DHS-validated approach, but not perfect** — roughly 1 in 5 cells
+  could still be misclassified. The next likely lever is more/denser
+  ground-truth labels (currently only 1,683 DHS-labeled cells nationwide) —
+  diminishing returns from here likely require genuinely new label sources
+  (a newer/larger household survey), not more satellite features.
 - **OSM power-pole data is extremely sparse: only 0.06% of Kenya's 2.91M
   cells (1,677) have a mapped pole.** `dist_to_nearest_pole_m` is therefore
   really "distance to nearest of 1,677 scattered points," not distance to
@@ -185,5 +225,7 @@ to `data/raw/viirs/` first -- requires a free EOG account, see below.)
 - WorldPop Kenya 2020 population count, 1km resolution (data.worldpop.org)
 - VIIRS annual nighttime lights composite, 2025 v2.2 (Earth Observation
   Group, Payne Institute, eogdata.mines.edu) — free account required
+- Google Open Buildings v3 (Google Research, storage.googleapis.com/open-buildings-data)
+  — public, no account required
 - Kenya Commission on Revenue Allocation — county electrification rates
   (not yet integrated as a model feature, held for future work)

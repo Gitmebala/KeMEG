@@ -42,6 +42,8 @@ CANDIDATE_FEATURES = [
     "dist_to_nearest_road_m",
     "roads_within_2000m",
     "ntl_radiance",
+    "google_building_count",
+    "google_buildings_within_1000m",
 ]
 
 

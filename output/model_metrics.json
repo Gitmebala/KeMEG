@@ -1,19 +1,19 @@
 {
   "results": {
     "logistic_regression": {
-      "spatial_cv_auc": 0.7920179307083841,
-      "spatial_test_auc": 0.8415357142857143,
-      "spatial_test_accuracy": 0.755223880597015
+      "spatial_cv_auc": 0.8411139540302328,
+      "spatial_test_auc": 0.8750714285714284,
+      "spatial_test_accuracy": 0.7970149253731343
     },
     "random_forest": {
-      "spatial_cv_auc": 0.8167310234198857,
-      "spatial_test_auc": 0.8508571428571428,
-      "spatial_test_accuracy": 0.7701492537313432
+      "spatial_cv_auc": 0.8455188468059454,
+      "spatial_test_auc": 0.87725,
+      "spatial_test_accuracy": 0.8
     },
     "xgboost": {
-      "spatial_cv_auc": 0.797093167299655,
-      "spatial_test_auc": 0.8572857142857143,
-      "spatial_test_accuracy": 0.764179104477612
+      "spatial_cv_auc": 0.8319409567662955,
+      "spatial_test_auc": 0.8863571428571428,
+      "spatial_test_accuracy": 0.8059701492537313
     }
   },
   "best_model": "xgboost",
