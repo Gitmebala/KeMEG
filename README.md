@@ -144,6 +144,19 @@ to `data/raw/viirs/` first -- requires a free EOG account, see below.)
   next likely lever is more/denser ground-truth labels (currently only
   1,683 DHS-labeled cells nationwide) or finer building-footprint data than
   this OSM extract's binary presence flags.
+- **OSM power-pole data is extremely sparse: only 0.06% of Kenya's 2.91M
+  cells (1,677) have a mapped pole.** `dist_to_nearest_pole_m` is therefore
+  really "distance to nearest of 1,677 scattered points," not distance to
+  the real grid -- and it initially misclassified 1,559 candidate cells as
+  underserved-and-far-from-grid despite those cells showing detectable VIIRS
+  night light (direct evidence they're already electrified). Fixed with a
+  hard override: any candidate with `ntl_radiance > 0` is excluded regardless
+  of what the model or the pole-distance proxy says, since observed light is
+  stronger ground truth than either. None of the final 40 ranked sites were
+  affected by this specific bug, but it's a real latent risk in the
+  underlying candidate pool worth flagging prominently, and a caution against
+  trusting `dist_to_nearest_pole_m` (or the visible line/banding patterns it
+  creates in the raw prediction grid) as precise "distance to the real grid."
 - **County-level CRA electrification rates aren't currently joined in as a
   model feature** — no county boundary shapefile was available locally, and
   public sources we tried (geoBoundaries API, GitHub mirrors) were either

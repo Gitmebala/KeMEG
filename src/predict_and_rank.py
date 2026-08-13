@@ -107,6 +107,20 @@ def main():
     candidates = candidates[candidates["population"] >= MIN_POPULATION]
     candidates = candidates[candidates["dist_to_nearest_pole_m"] >= MIN_DIST_TO_GRID_M]
 
+    # Hard override: OSM has mapped power poles for only 0.06% of Kenya's cells
+    # (1,677 of 2.91M), so "distance to nearest pole" is really "distance to
+    # nearest of 1,677 scattered points" -- wildly incomplete relative to the
+    # real grid, and it wrongly classified real electrified areas (confirmed
+    # by their own detectable VIIRS night light) as underserved-and-far-from-
+    # grid purely because nobody mapped the poles actually serving them.
+    # Detectable night light is direct observational evidence of existing
+    # electrification and overrides both the model's probability and the
+    # pole-distance proxy -- exclude any such cell from being a candidate.
+    before_ntl_filter = len(candidates)
+    candidates = candidates[candidates["ntl_radiance"] <= 0]
+    print(f"Dropped {before_ntl_filter - len(candidates)} candidates with detectable night "
+          f"light (real evidence of existing electrification the pole-distance proxy missed)")
+
     print(f"{len(candidates)} candidate cells after filtering (underserved + populated + far from grid)")
     print("Candidate distribution by region (rough quadrants):")
     print(f"  lon<36 (west): {(candidates['lon'] < 36).sum()}   lon>=36 (east): {(candidates['lon'] >= 36).sum()}")
